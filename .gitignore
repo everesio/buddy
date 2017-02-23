@@ -22,3 +22,12 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# Intellij
+.idea/
+*.iml
+*.iws
+out/
+
+# Build
+build/
