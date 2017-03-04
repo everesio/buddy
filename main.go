@@ -37,6 +37,10 @@ func main() {
 	kingpin.Version(version)
 	kingpin.Parse()
 
+	formatter := &log.TextFormatter{
+		FullTimestamp: true,
+	}
+	log.SetFormatter(formatter)
 	if params.debug {
 		log.SetLevel(log.DebugLevel)
 	}
