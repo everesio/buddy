@@ -218,7 +218,6 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 
 			log.Infof("[Cloud DNS]: Change deletion: %s / %v", existingRecordGroup.DNSName, existingRecordGroup.IPs)
 
-
 		} else {
 			existingIPs := sortedCopy(existingRecordGroup.IPs)
 			targetIPs := sortedCopy(targetRecordGroup.IPs)
@@ -229,7 +228,7 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 				dnsZoneChange := &dnsZoneChange{dnsZone: existingRecordGroup.DNSZone, change: change}
 				dnsZoneChanges = append(dnsZoneChanges, dnsZoneChange)
 
-				log.Infof("[Cloud DNS]: Change modification: %s / %v -> %v", existingRecordGroup.DNSName, existingRecordGroup.IPs,targetRecordGroup.IPs)
+				log.Infof("[Cloud DNS]: Change modification: %s / %v -> %v", existingRecordGroup.DNSName, existingRecordGroup.IPs, targetRecordGroup.IPs)
 			}
 		}
 	}
@@ -253,7 +252,13 @@ func (gc *GoogleConsumer) Records(computeZones []string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return filterOwnRecordGroups(currentRecordGroups, computeZones), nil
+
+	recordGroups := make([]*RecordGroup, 0, 16)
+	for _, v := range filterOwnRecordGroups(currentRecordGroups, computeZones) {
+		recordGroups = append(recordGroups, v)
+	}
+	return recordGroups, nil
+
 }
 
 func filterOwnRecordGroups(recordGroups map[string]*RecordGroup, computeZones []string) map[string]*RecordGroup {
@@ -327,7 +332,7 @@ func (gc *GoogleConsumer) currentRecordGroups() (map[string]*RecordGroup, error)
 }
 
 func printRecordGroups(recordGroup map[string]*RecordGroup) {
-	for _,v := range recordGroup {
+	for _, v := range recordGroup {
 		log.Debugln(" ", v.DNSZone, v.DNSName, v.IPs, v.Labels, v.TTL)
 	}
 }

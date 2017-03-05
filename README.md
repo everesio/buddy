@@ -18,7 +18,7 @@ Design and implementation are inspired by [Mate](https://github.com/zalando-incu
   - dns-zones               : comma separated names of DNS managed zones
   - multiple-ip-record      : allow multiple IP addresses in A record  (default true)
   - producer                : the endpoints producer to use (default google)    
-  - producer                : the endpoints consumer to use (default google)    
+  - consumer                : the endpoints consumer to use (default google)
 
 * Instance metadata:
   - external-dns-zone       : Name of DNS managed zone for EXTERNAL_IP (A + TXT records).  
