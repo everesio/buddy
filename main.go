@@ -6,6 +6,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/everesio/buddy/consumers"
 	"github.com/everesio/buddy/producers"
+	"github.com/everesio/buddy/controller"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"net/http"
@@ -13,16 +14,18 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 var version = "Unknown"
 
 var params struct {
-	httpAddr  string
-	debugAddr string
-	producer  string
-	consumer  string
-	debug     bool
+	httpAddr     string
+	debugAddr    string
+	producer     string
+	consumer     string
+	debug        bool
+	syncInterval int
 }
 
 func init() {
@@ -31,6 +34,7 @@ func init() {
 	kingpin.Flag("producer", "The endpoints producer to use.").Default("google").StringVar(&params.producer)
 	kingpin.Flag("consumer", "The endpoints consumer to use.").Default("google").StringVar(&params.consumer)
 	kingpin.Flag("debug", "Enable debug logging.").BoolVar(&params.debug)
+	kingpin.Flag("sync-interval", "Sync interval in seconds.").Default("15").IntVar(&params.syncInterval)
 }
 
 func main() {
@@ -51,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error creating producer: %v", err)
 	}
-	consumer, err := consumers.New(params.consumer)
+	consumer, err := consumers.NewSynced(params.consumer)
 	if err != nil {
 		log.Fatalf("Error creating consumer: %v", err)
 	}
@@ -64,6 +68,11 @@ func main() {
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 		errc <- fmt.Errorf("%s", <-c)
 	}()
+
+	opts := &controller.Options{
+		SyncInterval: time.Duration(params.syncInterval) * time.Second,
+	}
+	ctrl := controller.New(producer, consumer, opts, errc)
 
 	// Debug listener.
 	go func() {
@@ -83,9 +92,14 @@ func main() {
 		http.Handle("/metrics", promhttp.Handler())
 		http.Handle("/endpoints", endpointsHandler(producer))
 		http.Handle("/records", recordsHandler(producer, consumer))
-		http.Handle("/sync", syncHandler(producer, consumer))
+		http.Handle("/sync", syncHandler(ctrl))
 		log.Info("HTTP addr ", params.httpAddr)
 		errc <- http.ListenAndServe(params.httpAddr, nil)
+	}()
+
+	// Controller.
+	go func() {
+		ctrl.Run()
 	}()
 
 	// Run!
@@ -114,14 +128,9 @@ func recordsHandler(producer producers.Producer, consumer consumers.Consumer) ht
 	})
 }
 
-func syncHandler(producer producers.Producer, consumer consumers.Consumer) http.Handler {
+func syncHandler(controller *controller.Controller) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		endpoints, err := producer.Endpoints()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		err = consumer.Sync(producer.ComputeZones(), endpoints)
+		err := controller.Synchronize()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
