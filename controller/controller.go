@@ -4,6 +4,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/everesio/buddy/consumers"
+	"github.com/everesio/buddy/pkg"
 	"github.com/everesio/buddy/producers"
 	"github.com/prometheus/client_golang/prometheus"
 	"sync"
@@ -11,32 +12,35 @@ import (
 )
 
 var (
-	synchronizeTimeSummary prometheus.Summary
-	synchronizePending prometheus.Gauge
-	synchronizeError prometheus.Counter
+	synchronizeProcessingTimeSummary prometheus.Summary
+	synchronizePendingOps            prometheus.Gauge
+	synchronizeErrorCount            prometheus.Counter
 )
 
 func init() {
-	synchronizeTimeSummary = prometheus.NewSummary(prometheus.SummaryOpts{
+	synchronizeProcessingTimeSummary = prometheus.NewSummary(prometheus.SummaryOpts{
+		Namespace: "buddy",
 		Subsystem: "synchronize",
 		Name:      "processing_time",
 		Help:      "Time in milliseconds spent on synchronization.",
 	})
-	prometheus.MustRegister(synchronizeTimeSummary)
+	prometheus.MustRegister(synchronizeProcessingTimeSummary)
 
-	synchronizePending = prometheus.NewGauge(prometheus.GaugeOpts{
+	synchronizePendingOps = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: "buddy",
 		Subsystem: "synchronize",
 		Name:      "pending_ops",
 		Help:      "Number of pending synchronization operations.",
 	})
-	prometheus.MustRegister(synchronizePending)
+	prometheus.MustRegister(synchronizePendingOps)
 
-	synchronizeError = prometheus.NewCounter(prometheus.CounterOpts{
+	synchronizeErrorCount = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "buddy",
 		Subsystem: "synchronize",
 		Name:      "processing_error_count",
 		Help:      "Number of synchronization errors.",
 	})
-	prometheus.MustRegister(synchronizeError)
+	prometheus.MustRegister(synchronizeErrorCount)
 
 }
 
@@ -89,11 +93,13 @@ func (c *Controller) syncLoop() {
 }
 
 func (c *Controller) Synchronize() error {
-	start := time.Now()
-	defer func() { synchronizeTimeSummary.Observe(float64(time.Since(start) / time.Millisecond)) }()
+	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		synchronizeProcessingTimeSummary.Observe(v)
+	}))
+	defer timer.ObserveDuration()
 
-	synchronizePending.Inc()
-	defer func() {synchronizePending.Dec()}()
+	synchronizePendingOps.Inc()
+	defer func() { synchronizePendingOps.Dec() }()
 
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -102,13 +108,13 @@ func (c *Controller) Synchronize() error {
 
 	endpoints, err := c.producer.Endpoints()
 	if err != nil {
-		synchronizeError.Inc()
+		synchronizeErrorCount.Inc()
 		return fmt.Errorf("[Synchronize] Error getting endpoints from producer: %v", err)
 	}
 	computeZones := c.producer.ComputeZones()
 	err = c.consumer.Sync(computeZones, endpoints)
 	if err != nil {
-		synchronizeError.Inc()
+		synchronizeErrorCount.Inc()
 		return fmt.Errorf("[Synchronize] Error consuming endpoints: %v", err)
 	}
 	return nil

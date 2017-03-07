@@ -4,10 +4,37 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"fmt"
+	"github.com/everesio/buddy/pkg"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/api/dns/v1"
 	"net/http"
 	"strings"
 )
+
+var (
+	requestZonesTime   prometheus.Summary
+	requestRecordsTime *prometheus.SummaryVec
+)
+
+func init() {
+	requestZonesTime = prometheus.NewSummary(prometheus.SummaryOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "get_zones_time",
+		Help:      "Time in milliseconds spent on retrieval of the list of DNS zones.",
+	})
+	prometheus.MustRegister(requestZonesTime)
+
+	requestRecordsTime = prometheus.NewSummaryVec(prometheus.SummaryOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "get_records_time",
+		Help:      "Time in milliseconds spent on retrieval of the list of resource record sets contained within the specified manged zone.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(requestRecordsTime)
+}
 
 type dnsService struct {
 	project string
@@ -25,6 +52,11 @@ func newDNSService(project string, client *http.Client) (*dnsService, error) {
 // GetProjectDNSZones provides list of all project DNS managed zones.
 // It returns mapping DNSZone to its DNSName
 func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
+	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		requestZonesTime.Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
 	resp, err := s.service.ManagedZones.List(s.project).Do()
 	if err != nil {
 		return nil, fmt.Errorf("[Cloud DNS] Error getting managed zones: %v", err)
@@ -38,6 +70,11 @@ func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
 
 // getResourceRecordSets retrieves all DNS Resource Record Sets for a give DNS managed zone name
 func (s *dnsService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecordSet, error) {
+	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		requestRecordsTime.WithLabelValues(dnsZone).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
 	pageToken := ""
 
 	resourceRecordSets := make([]*dns.ResourceRecordSet, 0, 16)

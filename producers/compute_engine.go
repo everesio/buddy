@@ -4,9 +4,27 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"fmt"
+	"github.com/everesio/buddy/pkg"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/api/compute/v1"
 	"net/http"
 )
+
+var (
+	requestInstancesTime *prometheus.SummaryVec
+)
+
+func init() {
+	requestInstancesTime = prometheus.NewSummaryVec(prometheus.SummaryOpts{
+		Namespace: "buddy",
+		Subsystem: "compute_service",
+		Name:      "get_instances_time",
+		Help:      "Time in milliseconds spent on retrieval of the list of instances contained within the specified compute zone.",
+	},
+		[]string{"compute_zone"},
+	)
+	prometheus.MustRegister(requestInstancesTime)
+}
 
 type googleInstance struct {
 	// googleInstance name. It must be 1-63 characters long, comply with RFC1035
@@ -38,6 +56,11 @@ func newComputeEngineService(project string, client *http.Client) (*computeEngin
 }
 
 func (svc *computeEngineService) getInstances(zone string) ([]googleInstance, error) {
+	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		requestInstancesTime.WithLabelValues(zone).Observe(v)
+	}))
+	defer timer.ObserveDuration()
+
 	instances := make([]googleInstance, 0, 16)
 
 	pageToken := ""
