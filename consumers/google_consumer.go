@@ -5,6 +5,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/everesio/buddy/pkg"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/dns/v1"
@@ -19,6 +20,44 @@ const (
 	// buddy/<compute-zone>/IPv4
 	labelPrefix = computeZonePrefix + "/%s"
 )
+
+var (
+	additionsCounter     *prometheus.CounterVec
+	deletionsCounter     *prometheus.CounterVec
+	modificationsCounter *prometheus.CounterVec
+)
+
+func init() {
+	additionsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "google_consumer",
+		Name:      "rrs_additions",
+		Help:      "Number of calculated resource record set additions.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(additionsCounter)
+
+	deletionsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "google_consumer",
+		Name:      "rrs_deletions",
+		Help:      "Number of calculated resource record set deletions.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(deletionsCounter)
+
+	modificationsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "google_consumer",
+		Name:      "rrs_modifications",
+		Help:      "Number of calculated resource record set modifications.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(modificationsCounter)
+}
 
 // GoogleConsumer synchronizes google cloud DNS
 type GoogleConsumer struct {
@@ -216,6 +255,7 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 			dnsZoneChange := &dnsZoneChange{dnsZone: existingRecordGroup.DNSZone, change: change}
 			dnsZoneChanges = append(dnsZoneChanges, dnsZoneChange)
 
+			deletionsCounter.WithLabelValues(targetRecordGroup.DNSZone).Inc()
 			log.Infof("[Cloud DNS]: Change deletion: %s / %v", existingRecordGroup.DNSName, existingRecordGroup.IPs)
 
 		} else {
@@ -228,6 +268,7 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 				dnsZoneChange := &dnsZoneChange{dnsZone: existingRecordGroup.DNSZone, change: change}
 				dnsZoneChanges = append(dnsZoneChanges, dnsZoneChange)
 
+				modificationsCounter.WithLabelValues(targetRecordGroup.DNSZone).Inc()
 				log.Infof("[Cloud DNS]: Change modification: %s / %v -> %v", existingRecordGroup.DNSName, existingRecordGroup.IPs, targetRecordGroup.IPs)
 			}
 		}
@@ -240,6 +281,7 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 			dnsZoneChange := &dnsZoneChange{dnsZone: targetRecordGroup.DNSZone, change: change}
 			dnsZoneChanges = append(dnsZoneChanges, dnsZoneChange)
 
+			additionsCounter.WithLabelValues(targetRecordGroup.DNSZone).Inc()
 			log.Infof("[Cloud DNS]: Change addition: %s / %v", targetRecordGroup.DNSName, targetRecordGroup.IPs)
 		}
 	}
