@@ -12,20 +12,24 @@ import (
 )
 
 var (
-	requestZonesTime   prometheus.Summary
-	requestRecordsTime *prometheus.SummaryVec
+	requestZonesTimeSummary        prometheus.Summary
+	requestRecordsTimeSummary      *prometheus.SummaryVec
+	rrsAdditionsCounter            *prometheus.CounterVec
+	rrsDeletionsCounter            *prometheus.CounterVec
+	rrsChangeErrorCounter          *prometheus.CounterVec
+	rrsChangeAlreadyExistedCounter *prometheus.CounterVec
 )
 
 func init() {
-	requestZonesTime = prometheus.NewSummary(prometheus.SummaryOpts{
+	requestZonesTimeSummary = prometheus.NewSummary(prometheus.SummaryOpts{
 		Namespace: "buddy",
 		Subsystem: "dns_service",
 		Name:      "get_zones_time",
 		Help:      "Time in milliseconds spent on retrieval of the list of DNS zones.",
 	})
-	prometheus.MustRegister(requestZonesTime)
+	prometheus.MustRegister(requestZonesTimeSummary)
 
-	requestRecordsTime = prometheus.NewSummaryVec(prometheus.SummaryOpts{
+	requestRecordsTimeSummary = prometheus.NewSummaryVec(prometheus.SummaryOpts{
 		Namespace: "buddy",
 		Subsystem: "dns_service",
 		Name:      "get_records_time",
@@ -33,7 +37,48 @@ func init() {
 	},
 		[]string{"dns_zone"},
 	)
-	prometheus.MustRegister(requestRecordsTime)
+	prometheus.MustRegister(requestRecordsTimeSummary)
+
+	rrsAdditionsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "rrs_additions",
+		Help:      "Number of resource record set additions.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(rrsAdditionsCounter)
+
+	rrsDeletionsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "rrs_deletions",
+		Help:      "Number of resource record set deletions.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(rrsDeletionsCounter)
+
+	rrsChangeErrorCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "rrs_change_errors",
+		Help:      "Number of rrs change errors.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(rrsChangeErrorCounter)
+
+	rrsChangeAlreadyExistedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "buddy",
+		Subsystem: "dns_service",
+		Name:      "rrs_already_exists",
+		Help:      "Number of rrs change operations rejected due to already_exists error.",
+	},
+		[]string{"dns_zone"},
+	)
+	prometheus.MustRegister(rrsChangeAlreadyExistedCounter)
+
 }
 
 type dnsService struct {
@@ -53,7 +98,7 @@ func newDNSService(project string, client *http.Client) (*dnsService, error) {
 // It returns mapping DNSZone to its DNSName
 func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
 	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
-		requestZonesTime.Observe(v)
+		requestZonesTimeSummary.Observe(v)
 	}))
 	defer timer.ObserveDuration()
 
@@ -71,7 +116,7 @@ func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
 // getResourceRecordSets retrieves all DNS Resource Record Sets for a give DNS managed zone name
 func (s *dnsService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecordSet, error) {
 	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
-		requestRecordsTime.WithLabelValues(dnsZone).Observe(v)
+		requestRecordsTimeSummary.WithLabelValues(dnsZone).Observe(v)
 	}))
 	defer timer.ObserveDuration()
 
@@ -108,14 +153,18 @@ func (s *dnsService) applyDNSZoneChange(dnsZoneChange *dnsZoneChange) error {
 		log.Infof("Didn't submit change (no changes)")
 		return nil
 	}
-
 	_, err := s.service.Changes.Create(s.project, dnsZoneChange.dnsZone, dnsZoneChange.change).Do()
 	if err != nil {
 		if strings.Contains(err.Error(), "alreadyExists") {
+			rrsChangeAlreadyExistedCounter.WithLabelValues(dnsZoneChange.dnsZone).Inc()
 			log.Warnf("Cannot update some DNS records in zone %s : %v", dnsZoneChange.dnsZone, err)
 			return nil
 		}
+		rrsChangeErrorCounter.WithLabelValues(dnsZoneChange.dnsZone).Inc()
 		return fmt.Errorf("Unable to create change for %s/%s: %v", s.project, dnsZoneChange.dnsZone, err)
 	}
+	rrsAdditionsCounter.WithLabelValues(dnsZoneChange.dnsZone).Add(float64(len(dnsZoneChange.change.Additions)))
+	rrsDeletionsCounter.WithLabelValues(dnsZoneChange.dnsZone).Add(float64(len(dnsZoneChange.change.Deletions)))
+
 	return nil
 }

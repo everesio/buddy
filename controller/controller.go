@@ -13,8 +13,8 @@ import (
 
 var (
 	synchronizeProcessingTimeSummary prometheus.Summary
-	synchronizePendingOps            prometheus.Gauge
-	synchronizeErrorCount            prometheus.Counter
+	synchronizePendingOpsGauge       prometheus.Gauge
+	synchronizeErrorCounter          prometheus.Counter
 )
 
 func init() {
@@ -26,21 +26,21 @@ func init() {
 	})
 	prometheus.MustRegister(synchronizeProcessingTimeSummary)
 
-	synchronizePendingOps = prometheus.NewGauge(prometheus.GaugeOpts{
+	synchronizePendingOpsGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "buddy",
 		Subsystem: "synchronize",
 		Name:      "pending_ops",
 		Help:      "Number of pending synchronization operations.",
 	})
-	prometheus.MustRegister(synchronizePendingOps)
+	prometheus.MustRegister(synchronizePendingOpsGauge)
 
-	synchronizeErrorCount = prometheus.NewCounter(prometheus.CounterOpts{
+	synchronizeErrorCounter = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "buddy",
 		Subsystem: "synchronize",
 		Name:      "processing_error_count",
 		Help:      "Number of synchronization errors.",
 	})
-	prometheus.MustRegister(synchronizeErrorCount)
+	prometheus.MustRegister(synchronizeErrorCounter)
 
 }
 
@@ -98,8 +98,8 @@ func (c *Controller) Synchronize() error {
 	}))
 	defer timer.ObserveDuration()
 
-	synchronizePendingOps.Inc()
-	defer func() { synchronizePendingOps.Dec() }()
+	synchronizePendingOpsGauge.Inc()
+	defer func() { synchronizePendingOpsGauge.Dec() }()
 
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -108,13 +108,13 @@ func (c *Controller) Synchronize() error {
 
 	endpoints, err := c.producer.Endpoints()
 	if err != nil {
-		synchronizeErrorCount.Inc()
+		synchronizeErrorCounter.Inc()
 		return fmt.Errorf("[Synchronize] Error getting endpoints from producer: %v", err)
 	}
 	computeZones := c.producer.ComputeZones()
 	err = c.consumer.Sync(computeZones, endpoints)
 	if err != nil {
-		synchronizeErrorCount.Inc()
+		synchronizeErrorCounter.Inc()
 		return fmt.Errorf("[Synchronize] Error consuming endpoints: %v", err)
 	}
 	return nil

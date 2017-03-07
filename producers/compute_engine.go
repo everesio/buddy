@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	requestInstancesTime *prometheus.SummaryVec
+	requestInstancesTimeSummary *prometheus.SummaryVec
 )
 
 func init() {
-	requestInstancesTime = prometheus.NewSummaryVec(prometheus.SummaryOpts{
+	requestInstancesTimeSummary = prometheus.NewSummaryVec(prometheus.SummaryOpts{
 		Namespace: "buddy",
 		Subsystem: "compute_service",
 		Name:      "get_instances_time",
@@ -23,7 +23,7 @@ func init() {
 	},
 		[]string{"compute_zone"},
 	)
-	prometheus.MustRegister(requestInstancesTime)
+	prometheus.MustRegister(requestInstancesTimeSummary)
 }
 
 type googleInstance struct {
@@ -57,7 +57,7 @@ func newComputeEngineService(project string, client *http.Client) (*computeEngin
 
 func (svc *computeEngineService) getInstances(zone string) ([]googleInstance, error) {
 	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
-		requestInstancesTime.WithLabelValues(zone).Observe(v)
+		requestInstancesTimeSummary.WithLabelValues(zone).Observe(v)
 	}))
 	defer timer.ObserveDuration()
 
