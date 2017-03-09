@@ -255,7 +255,7 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 			dnsZoneChange := &dnsZoneChange{dnsZone: existingRecordGroup.DNSZone, change: change}
 			dnsZoneChanges = append(dnsZoneChanges, dnsZoneChange)
 
-			deletionsCounter.WithLabelValues(targetRecordGroup.DNSZone).Inc()
+			deletionsCounter.WithLabelValues(existingRecordGroup.DNSZone).Inc()
 			log.Infof("[Cloud DNS]: Change deletion: %s / %v", existingRecordGroup.DNSName, existingRecordGroup.IPs)
 
 		} else {
