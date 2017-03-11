@@ -61,8 +61,17 @@ func (f *fakeRecord) recordGroup(name string, ip string, label string) *RecordGr
 		Labels:  []string{label}}
 }
 
-func (f *fakeRecord) aAndTxtRecords(name string, ip string, label string) []*dns.ResourceRecordSet {
-	return []*dns.ResourceRecordSet{f.aRecord(name, ip), f.txtRecord(name, label)}
+func (f *fakeRecord) multiRecordGroup(name string, ips []string, labels []string) *RecordGroup {
+	return &RecordGroup{
+		DNSName: name + "." + f.dnsName,
+		DNSZone: f.dnsZone,
+		IPs:     ips,
+		TTL:     f.ttl,
+		Labels:  labels}
+}
+
+func (f *fakeRecord) aAndTxtRecords(name string, ips []string, labels []string) []*dns.ResourceRecordSet {
+	return []*dns.ResourceRecordSet{f.aRecord(name, ips...), f.txtRecord(name, labels...)}
 }
 
 func concatRecords(elems ...[]*dns.ResourceRecordSet) []*dns.ResourceRecordSet {
@@ -148,12 +157,17 @@ func TestCurrentRecordGroups(t *testing.T) {
 	a.NotEmpty(result)
 	a.Equal(5, len(result))
 
-	a.EqualValues(result["instance-1.internal.example.com."], fi.recordGroup("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1"))
-	a.EqualValues(result["instance-2.internal.example.com."], fi.recordGroup("instance-2", "10.132.0.2", ""))
-	a.EqualValues(result["instance-3.internal.example.com."], fi.recordGroup("instance-3", "10.132.0.3", "buddy/europe-west1-d/10.132.0.3"))
-	a.EqualValues(result["instance-4.external.example.com."], fe.recordGroup("instance-4", "10.132.0.4", "buddy/europe-west1-c/10.132.0.4"))
+	resultMap := make(map[string]*RecordGroup)
+	for _, v := range result {
+		resultMap[v.DNSName] = v
+	}
 
-	rg := result["instance-5.external.example.com."]
+	a.EqualValues(resultMap["instance-1.internal.example.com."], fi.recordGroup("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1"))
+	a.EqualValues(resultMap["instance-2.internal.example.com."], fi.recordGroup("instance-2", "10.132.0.2", ""))
+	a.EqualValues(resultMap["instance-3.internal.example.com."], fi.recordGroup("instance-3", "10.132.0.3", "buddy/europe-west1-d/10.132.0.3"))
+	a.EqualValues(resultMap["instance-4.external.example.com."], fe.recordGroup("instance-4", "10.132.0.4", "buddy/europe-west1-c/10.132.0.4"))
+
+	rg := resultMap["instance-5.external.example.com."]
 	a.EqualValues(rg, &RecordGroup{DNSName: "instance-5.external.example.com.", DNSZone: "external-example-com",
 		IPs: []string{"10.132.0.51", "10.132.0.52"}, TTL: 500, Labels: []string{"buddy/europe-west1-c/10.132.0.51", "buddy/europe-west1-d/10.132.0.52"}})
 
@@ -164,58 +178,48 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 
 	fi := &fakeRecord{dnsName: "internal.example.com.", dnsZone: "internal-example-com", ttl: 400}
 	rg1 := fi.recordGroup("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1")
-	ch1 := fi.aAndTxtRecords("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1")
+	ch1 := fi.aAndTxtRecords("instance-1", []string{"10.132.0.1"}, []string{"buddy/europe-west1-c/10.132.0.1"})
 
 	rg1B := fi.recordGroup("instance-1", "10.132.0.10", "buddy/europe-west1-c/10.132.0.10")
-	ch1B := fi.aAndTxtRecords("instance-1", "10.132.0.10", "buddy/europe-west1-c/10.132.0.10")
+	ch1B := fi.aAndTxtRecords("instance-1", []string{"10.132.0.10"}, []string{"buddy/europe-west1-c/10.132.0.10"})
 
 	rg2 := fi.recordGroup("instance-2", "10.132.0.2", "buddy/europe-west1-c/10.132.0.2")
-	ch2 := fi.aAndTxtRecords("instance-2", "10.132.0.2", "buddy/europe-west1-c/10.132.0.2")
+	ch2 := fi.aAndTxtRecords("instance-2", []string{"10.132.0.2"}, []string{"buddy/europe-west1-c/10.132.0.2"})
 
 	testCases := []struct {
 		testName             string
-		existingRecordGroups map[string]*RecordGroup
-		targetRecordGroups   map[string]*RecordGroup
+		existingRecordGroups []*RecordGroup
+		targetRecordGroups   []*RecordGroup
 		dnsZoneChange        []*dnsZoneChange
 	}{
 		{
 			"nothing to do / no records",
-			map[string]*RecordGroup{},
-			map[string]*RecordGroup{},
+			[]*RecordGroup{},
+			[]*RecordGroup{},
 			[]*dnsZoneChange{},
 		},
 		{
 			"nothing to do / same record",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
+			[]*RecordGroup{rg1},
+			[]*RecordGroup{rg1},
 			[]*dnsZoneChange{},
 		},
 		{
 			"nothing to do / same records",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1, "instance-2.internal.example.com.": rg2},
-			map[string]*RecordGroup{"instance-2.internal.example.com.": rg2, "instance-1.internal.example.com.": rg1},
+			[]*RecordGroup{rg1, rg2},
+			[]*RecordGroup{rg2, rg1},
 			[]*dnsZoneChange{},
 		},
 		{
 			"nothing to do / multiple IPs are sorted",
-			map[string]*RecordGroup{
-				"instance-1.internal.example.com.": {DNSName: "instance-1.internal.example.com.",
-					DNSZone: "internal-example-com",
-					IPs:     []string{"10.132.0.2", "10.132.0.1"},
-				},
-			},
-			map[string]*RecordGroup{
-				"instance-1.internal.example.com.": {DNSName: "instance-1.internal.example.com.",
-					DNSZone: "internal-example-com",
-					IPs:     []string{"10.132.0.1", "10.132.0.2"},
-				},
-			},
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.2", "10.132.0.1"}, []string{})},
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.1", "10.132.0.2"}, []string{})},
 			[]*dnsZoneChange{},
 		},
 		{
 			"add record",
-			map[string]*RecordGroup{},
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
+			[]*RecordGroup{},
+			[]*RecordGroup{rg1},
 			[]*dnsZoneChange{
 				{dnsZone: "internal-example-com",
 					change: &dns.Change{
@@ -224,29 +228,27 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 				},
 			},
 		},
-		/*
-			{
-				"add records",
-				map[string]*RecordGroup{},
-				map[string]*RecordGroup{"instance-1.internal.example.com.": rg1,"instance-2.internal.example.com.": rg2,},
-				[]*dnsZoneChange{
-					{dnsZone: "internal-example-com",
-						change: &dns.Change{
-							Additions: ch1,
-						},
+		{
+			"add records",
+			[]*RecordGroup{},
+			[]*RecordGroup{rg1, rg2},
+			[]*dnsZoneChange{
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Additions: ch1,
 					},
-					{dnsZone: "internal-example-com",
-						change: &dns.Change{
-							Additions: ch2,
-						},
+				},
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Additions: ch2,
 					},
 				},
 			},
-		*/
+		},
 		{
 			"add next record",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1, "instance-2.internal.example.com.": rg2},
+			[]*RecordGroup{rg1},
+			[]*RecordGroup{rg1, rg2},
 			[]*dnsZoneChange{
 				{dnsZone: "internal-example-com",
 					change: &dns.Change{
@@ -257,8 +259,8 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 		},
 		{
 			"delete record",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
-			map[string]*RecordGroup{},
+			[]*RecordGroup{rg1},
+			[]*RecordGroup{},
 			[]*dnsZoneChange{
 				{dnsZone: "internal-example-com",
 					change: &dns.Change{
@@ -267,29 +269,27 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 				},
 			},
 		},
-		/*
-			{
-				"delete records",
-				map[string]*RecordGroup{"instance-1.internal.example.com.": rg1,"instance-2.internal.example.com.": rg2,},
-				map[string]*RecordGroup{},
-				[]*dnsZoneChange{
-					{dnsZone: "internal-example-com",
-						change: &dns.Change{
-							Deletions: ch1,
-						},
+		{
+			"delete records",
+			[]*RecordGroup{rg1, rg2},
+			[]*RecordGroup{},
+			[]*dnsZoneChange{
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Deletions: ch1,
 					},
-					{dnsZone: "internal-example-com",
-						change: &dns.Change{
-							Deletions: ch2,
-						},
+				},
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Deletions: ch2,
 					},
 				},
 			},
-		*/
+		},
 		{
 			"delete previous record",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1, "instance-2.internal.example.com.": rg2},
-			map[string]*RecordGroup{"instance-2.internal.example.com.": rg2},
+			[]*RecordGroup{rg1, rg2},
+			[]*RecordGroup{rg2},
 			[]*dnsZoneChange{
 				{dnsZone: "internal-example-com",
 					change: &dns.Change{
@@ -300,13 +300,52 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 		},
 		{
 			"modify record",
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1},
-			map[string]*RecordGroup{"instance-1.internal.example.com.": rg1B},
+			[]*RecordGroup{rg1},
+			[]*RecordGroup{rg1B},
 			[]*dnsZoneChange{
 				{dnsZone: "internal-example-com",
 					change: &dns.Change{
 						Deletions: ch1,
 						Additions: ch1B,
+					},
+				},
+			},
+		},
+		{
+			"modify record from list",
+			[]*RecordGroup{rg1, rg2},
+			[]*RecordGroup{rg2, rg1B},
+			[]*dnsZoneChange{
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Deletions: ch1,
+						Additions: ch1B,
+					},
+				},
+			},
+		},
+		{
+			"add IP to record",
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.1"}, []string{"buddy/europe-west1-c/10.132.0.1"})},
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.1", "10.132.0.2"}, []string{"buddy/europe-west1-c/10.132.0.1", "buddy/europe-west1-c/10.132.0.2"})},
+			[]*dnsZoneChange{
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Deletions: fi.aAndTxtRecords("instance-1", []string{"10.132.0.1"}, []string{"buddy/europe-west1-c/10.132.0.1"}),
+						Additions: fi.aAndTxtRecords("instance-1", []string{"10.132.0.1", "10.132.0.2"}, []string{"buddy/europe-west1-c/10.132.0.1", "buddy/europe-west1-c/10.132.0.2"}),
+					},
+				},
+			},
+		},
+		{
+			"delete IP from record",
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.1", "10.132.0.2"}, []string{"buddy/europe-west1-c/10.132.0.1", "buddy/europe-west1-c/10.132.0.2"})},
+			[]*RecordGroup{fi.multiRecordGroup("instance-1", []string{"10.132.0.1"}, []string{"buddy/europe-west1-c/10.132.0.1"})},
+			[]*dnsZoneChange{
+				{dnsZone: "internal-example-com",
+					change: &dns.Change{
+						Deletions: fi.aAndTxtRecords("instance-1", []string{"10.132.0.1", "10.132.0.2"}, []string{"buddy/europe-west1-c/10.132.0.1", "buddy/europe-west1-c/10.132.0.2"}),
+						Additions: fi.aAndTxtRecords("instance-1", []string{"10.132.0.1"}, []string{"buddy/europe-west1-c/10.132.0.1"}),
 					},
 				},
 			},

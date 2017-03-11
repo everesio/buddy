@@ -167,7 +167,7 @@ func (gc *GoogleConsumer) SyncBulk(computeZones []string, endpoints []*pkg.Endpo
 	return nil
 }
 
-func (gc *GoogleConsumer) endpointsRecordGroups(computeZones []string, endpoints []*pkg.Endpoint) (map[string]*RecordGroup, error) {
+func (gc *GoogleConsumer) endpointsRecordGroups(computeZones []string, endpoints []*pkg.Endpoint) ([]*RecordGroup, error) {
 	managedZones, err := gc.dnsService.getProjectDNSZones()
 	if err != nil {
 		return nil, err
@@ -209,7 +209,12 @@ func (gc *GoogleConsumer) endpointsRecordGroups(computeZones []string, endpoints
 	if !gc.multipleIPRecord {
 		recordGroups = removeMultipleIPRecord(recordGroups)
 	}
-	return recordGroups, nil
+
+	result := make([]*RecordGroup, 0, len(recordGroups))
+	for _, v := range recordGroups {
+		result = append(result, v)
+	}
+	return result, nil
 }
 
 func removeMultipleIPRecord(recordGroups map[string]*RecordGroup) map[string]*RecordGroup {
@@ -237,8 +242,16 @@ func (gc *GoogleConsumer) getDNSZoneChanges(computeZones []string, endpoints []*
 	return calcDNSZoneChanges(ownRecordGroups, targetRecordGroups), nil
 }
 
-func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetRecordGroups map[string]*RecordGroup) []*dnsZoneChange {
+func calcDNSZoneChanges(existingRecordGroups []*RecordGroup, targetRecordGroups []*RecordGroup) []*dnsZoneChange {
 
+	existingMap := make(map[string]*RecordGroup)
+	for _, v := range existingRecordGroups {
+		existingMap[v.DNSName] = v
+	}
+	targetMap := make(map[string]*RecordGroup)
+	for _, v := range targetRecordGroups {
+		targetMap[v.DNSName] = v
+	}
 	log.Debugln("Current record groups:")
 	printRecordGroups(existingRecordGroups)
 
@@ -246,8 +259,8 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 	printRecordGroups(targetRecordGroups)
 
 	dnsZoneChanges := make([]*dnsZoneChange, 0)
-	for name, existingRecordGroup := range existingRecordGroups {
-		targetRecordGroup, exists := targetRecordGroups[name]
+	for _, existingRecordGroup := range existingRecordGroups {
+		targetRecordGroup, exists := targetMap[existingRecordGroup.DNSName]
 		if !exists {
 			change := new(dns.Change)
 			rrs := toResourceRecordSet(existingRecordGroup)
@@ -273,8 +286,8 @@ func calcDNSZoneChanges(existingRecordGroups map[string]*RecordGroup, targetReco
 			}
 		}
 	}
-	for name, targetRecordGroup := range targetRecordGroups {
-		_, exists := existingRecordGroups[name]
+	for _, targetRecordGroup := range targetRecordGroups {
+		_, exists := existingMap[targetRecordGroup.DNSName]
 		if !exists {
 			change := new(dns.Change)
 			change.Additions = append(change.Additions, toResourceRecordSet(targetRecordGroup)...)
@@ -303,13 +316,13 @@ func (gc *GoogleConsumer) Records(computeZones []string) (interface{}, error) {
 
 }
 
-func filterOwnRecordGroups(recordGroups map[string]*RecordGroup, computeZones []string) map[string]*RecordGroup {
+func filterOwnRecordGroups(recordGroups []*RecordGroup, computeZones []string) []*RecordGroup {
 	computeZonesPrefixes := make(map[string]struct{})
 	for _, computeZone := range computeZones {
 		computeZonesPrefixes[fmt.Sprintf(computeZonePrefix, computeZone)] = struct{}{}
 	}
-	ownRecordGroups := make(map[string]*RecordGroup)
-	for name, record := range recordGroups {
+	ownRecordGroups := make([]*RecordGroup, 0, len(recordGroups))
+	for _, record := range recordGroups {
 		var found bool
 		for _, label := range record.Labels {
 			for computeZonesPrefix := range computeZonesPrefixes {
@@ -323,7 +336,7 @@ func filterOwnRecordGroups(recordGroups map[string]*RecordGroup, computeZones []
 			log.Debugf("[Cloud DNS] Skip not owned record %v", record)
 			continue
 		}
-		ownRecordGroups[name] = record
+		ownRecordGroups = append(ownRecordGroups, record)
 
 	}
 	return ownRecordGroups
@@ -346,7 +359,7 @@ func toResourceRecordSet(recordGroup *RecordGroup) []*dns.ResourceRecordSet {
 	}
 }
 
-func (gc *GoogleConsumer) currentRecordGroups() (map[string]*RecordGroup, error) {
+func (gc *GoogleConsumer) currentRecordGroups() ([]*RecordGroup, error) {
 	records := make(map[string]*RecordGroup)
 	for dnsZone := range gc.dnsZones {
 		resourceRecordSets, err := gc.dnsService.getResourceRecordSets(dnsZone)
@@ -370,10 +383,14 @@ func (gc *GoogleConsumer) currentRecordGroups() (map[string]*RecordGroup, error)
 			}
 		}
 	}
-	return records, nil
+	result := make([]*RecordGroup, 0, len(records))
+	for _, v := range records {
+		result = append(result, v)
+	}
+	return result, nil
 }
 
-func printRecordGroups(recordGroup map[string]*RecordGroup) {
+func printRecordGroups(recordGroup []*RecordGroup) {
 	for _, v := range recordGroup {
 		log.Debugln(" ", v.DNSZone, v.DNSName, v.IPs, v.Labels, v.TTL)
 	}
