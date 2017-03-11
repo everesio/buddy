@@ -64,7 +64,7 @@ type GoogleConsumer struct {
 	dnsTTL           int64
 	dnsZones         map[string]struct{}
 	multipleIPRecord bool
-	dnsService       *dnsService
+	dnsService       dnsService
 }
 
 // NewGoogleConsumer creates a new GoogleConsumer
@@ -76,7 +76,7 @@ func NewGoogleConsumer() (*GoogleConsumer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("[Cloud DNS] Unable to create google oauth2 http client %v", err)
 	}
-	dnsService, err := newDNSService(pkg.GoogleConfig.Project, client)
+	dnsService, err := newCloudDNSService(pkg.GoogleConfig.Project, client)
 	if err != nil {
 		return nil, fmt.Errorf("[Cloud DNS] Unable to create cloud dns service: %v", err)
 	}
@@ -93,7 +93,7 @@ func NewGoogleConsumer() (*GoogleConsumer, error) {
 
 	for dnsZone := range dnsZones {
 		if _, ok := allDNSZones[dnsZone]; !ok {
-			return nil, fmt.Errorf("[Cloud DNS] Configured DNS zone '%s' is not A managed zone. Managed zones %v", dnsZone, allDNSZones)
+			return nil, fmt.Errorf("[Cloud DNS] Configured DNS zone '%s' is not a managed zone. Managed zones %v", dnsZone, allDNSZones)
 		}
 	}
 	dnsTTL := pkg.GoogleConfig.DNSTTL

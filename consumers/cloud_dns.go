@@ -81,22 +81,32 @@ func init() {
 
 }
 
-type dnsService struct {
+type dnsService interface {
+	getProjectDNSZones() (map[string]string, error)
+	getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecordSet, error)
+	applyDNSZoneChange(dnsZoneChange *dnsZoneChange) error
+}
+type dnsZoneChange struct {
+	dnsZone string
+	change  *dns.Change
+}
+
+type cloudDNSService struct {
 	project string
 	service *dns.Service
 }
 
-func newDNSService(project string, client *http.Client) (*dnsService, error) {
+func newCloudDNSService(project string, client *http.Client) (*cloudDNSService, error) {
 	service, err := dns.New(client)
 	if err != nil {
 		return nil, err
 	}
-	return &dnsService{project: project, service: service}, nil
+	return &cloudDNSService{project: project, service: service}, nil
 }
 
 // GetProjectDNSZones provides list of all project DNS managed zones.
 // It returns mapping DNSZone to its DNSName
-func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
+func (s *cloudDNSService) getProjectDNSZones() (map[string]string, error) {
 	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
 		requestZonesTimeSummary.Observe(v)
 	}))
@@ -114,7 +124,7 @@ func (s *dnsService) getProjectDNSZones() (map[string]string, error) {
 }
 
 // getResourceRecordSets retrieves all DNS Resource Record Sets for a give DNS managed zone name
-func (s *dnsService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecordSet, error) {
+func (s *cloudDNSService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecordSet, error) {
 	timer := pkg.NewTimer(prometheus.ObserverFunc(func(v float64) {
 		requestRecordsTimeSummary.WithLabelValues(dnsZone).Observe(v)
 	}))
@@ -143,12 +153,7 @@ func (s *dnsService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceRecor
 	return resourceRecordSets, nil
 }
 
-type dnsZoneChange struct {
-	dnsZone string
-	change  *dns.Change
-}
-
-func (s *dnsService) applyDNSZoneChange(dnsZoneChange *dnsZoneChange) error {
+func (s *cloudDNSService) applyDNSZoneChange(dnsZoneChange *dnsZoneChange) error {
 	if len(dnsZoneChange.change.Additions) == 0 && len(dnsZoneChange.change.Deletions) == 0 {
 		log.Infof("Didn't submit change (no changes)")
 		return nil
