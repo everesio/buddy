@@ -26,6 +26,7 @@ var params struct {
 	consumer     string
 	debug        bool
 	syncInterval int
+	jsonLog      bool
 }
 
 func init() {
@@ -35,14 +36,18 @@ func init() {
 	kingpin.Flag("consumer", "The endpoints consumer to use.").Default("google").StringVar(&params.consumer)
 	kingpin.Flag("debug", "Enable debug logging.").BoolVar(&params.debug)
 	kingpin.Flag("sync-interval", "Sync interval in seconds.").Default("15").IntVar(&params.syncInterval)
+	kingpin.Flag("json-log", "Enable json log formatter.").BoolVar(&params.jsonLog)
 }
 
 func main() {
 	kingpin.Version(version)
 	kingpin.Parse()
 
-	formatter := &log.TextFormatter{
-		FullTimestamp: true,
+	var formatter log.Formatter
+	if params.jsonLog {
+		formatter = &log.JSONFormatter{}
+	} else {
+		formatter = &log.TextFormatter{FullTimestamp: true}
 	}
 	log.SetFormatter(formatter)
 	if params.debug {

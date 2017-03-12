@@ -74,15 +74,6 @@ func (f *fakeRecord) aAndTxtRecords(name string, ips []string, labels []string) 
 	return []*dns.ResourceRecordSet{f.aRecord(name, ips...), f.txtRecord(name, labels...)}
 }
 
-func concatRecords(elems ...[]*dns.ResourceRecordSet) []*dns.ResourceRecordSet {
-	result := make([]*dns.ResourceRecordSet, 0, len(elems)*2)
-	for _, elem := range elems {
-		for _, rrs := range elem {
-			result = append(result, rrs)
-		}
-	}
-	return result
-}
 func quote(labels ...string) []string {
 	rrdatas := make([]string, 0, len(labels))
 	for _, label := range labels {
@@ -355,6 +346,119 @@ func TestCalcDNSZoneChanges(t *testing.T) {
 		t.Run(tc.testName, func(t *testing.T) {
 			result := calcDNSZoneChanges(tc.existingRecordGroups, tc.targetRecordGroups)
 			if !a.EqualValues(tc.dnsZoneChange, result) {
+				t.Fail()
+			}
+		})
+	}
+}
+
+func TestFilterOwnRecordGroups(t *testing.T) {
+	a := assert.New(t)
+	fi := &fakeRecord{dnsName: "internal.example.com.", dnsZone: "internal-example-com", ttl: 400}
+
+	r1 := fi.recordGroup("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1")
+	r2 := fi.recordGroup("instance-2", "10.132.0.2", "buddy/europe-west1-d/10.132.0.2")
+	r3 := fi.recordGroup("instance-3", "10.132.0.3", "buddy/europe-west1-e/10.132.0.3")
+	r4 := fi.recordGroup("instance-4", "10.132.0.4", "")
+	r5 := fi.recordGroup("instance-5", "10.132.0.5", "buddy/europe-west1-c/10.132.0.5")
+	r6 := fi.multiRecordGroup("instance-6", []string{"10.132.0.61", "10.132.0.62"}, []string{"buddy/europe-west1-c/10.132.0.61", "buddy/europe-west1-d/10.132.0.62"})
+	r7 := fi.recordGroup("instance-7", "10.132.0.7", "buddy2/europe-west1-c/10.132.0.7")
+
+	testCases := []struct {
+		testName        string
+		recordGroups    []*RecordGroup
+		computeZones    []string
+		ownRecordGroups []*RecordGroup
+	}{
+		{
+			"no current records",
+			[]*RecordGroup{},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{},
+		},
+		{
+			"no zones provided",
+			[]*RecordGroup{r1},
+			[]string{},
+			[]*RecordGroup{},
+		},
+		{
+			"r1 and one zone",
+			[]*RecordGroup{r1},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{r1},
+		},
+		{
+			"r2 two zones",
+			[]*RecordGroup{r1},
+			[]string{"europe-west1-c", "europe-west1-d"},
+			[]*RecordGroup{r1},
+		},
+		{
+			"r2 is filtered, not in europe-west1-c",
+			[]*RecordGroup{r1, r2},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{r1},
+		},
+		{
+			"r1 is filtered, not in europe-west1-d",
+			[]*RecordGroup{r1, r2},
+			[]string{"europe-west1-d"},
+			[]*RecordGroup{r2},
+		},
+		{
+			"r1 and r2 are own",
+			[]*RecordGroup{r1, r2},
+			[]string{"europe-west1-d", "europe-west1-c"},
+			[]*RecordGroup{r1, r2},
+		},
+		{
+			"r3 is filtered, not in europe-west1-c, europe-west1-d ",
+			[]*RecordGroup{r1, r3, r2},
+			[]string{"europe-west1-d", "europe-west1-c"},
+			[]*RecordGroup{r1, r2},
+		},
+		{
+			"r1 and r3 are filtered, not in europe-west1-d",
+			[]*RecordGroup{r1, r3, r2},
+			[]string{"europe-west1-d"},
+			[]*RecordGroup{r2},
+		},
+		{
+			"r4 is filtered, not in europe-west1-c",
+			[]*RecordGroup{r5, r4, r1},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{r5, r1},
+		},
+		{
+			"r4 is filtered",
+			[]*RecordGroup{r4},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{},
+		},
+		{
+			"multirecord labels match all compute zones",
+			[]*RecordGroup{r1, r2, r6, r3},
+			[]string{"europe-west1-c", "europe-west1-d", "europe-west1-e"},
+			[]*RecordGroup{r1, r2, r6, r3},
+		},
+		{
+			"multirecord labels does not match all compute zones",
+			[]*RecordGroup{r1, r2, r6, r3},
+			[]string{"europe-west1-c", "europe-west1-e"},
+			[]*RecordGroup{r1, r3},
+		},
+		{
+			"r7 label does not match buddy prefix",
+			[]*RecordGroup{r1, r7},
+			[]string{"europe-west1-c"},
+			[]*RecordGroup{r1},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.testName, func(t *testing.T) {
+			result := filterOwnRecordGroups(tc.recordGroups, tc.computeZones)
+			if !a.EqualValues(tc.ownRecordGroups, result) {
 				t.Fail()
 			}
 		})

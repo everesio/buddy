@@ -19,6 +19,7 @@ Design and implementation are inspired by [Mate](https://github.com/zalando-incu
   - multiple-ip-record      : allow multiple IP addresses in A record  (default true)
   - producer                : the endpoints producer to use (default google)    
   - consumer                : the endpoints consumer to use (default google)
+  - json-log                : log as JSON instead of the default ASCII formatter
 
 * Instance metadata:
   - external-dns-zone       : Name of DNS managed zone for EXTERNAL_IP (A + TXT records).  

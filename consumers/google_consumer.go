@@ -14,20 +14,25 @@ import (
 	"strings"
 )
 
-const (
-	// buddy/<compute-zone>
-	computeZonePrefix = "buddy/%s"
-	// buddy/<compute-zone>/IPv4
-	labelPrefix = computeZonePrefix + "/%s"
-)
-
 var (
+	// buddy/<compute-zone>
+	computeZonePrefix string
+	// buddy/<compute-zone>/IPv4
+	labelPrefix string
+
 	additionsCounter     *prometheus.CounterVec
 	deletionsCounter     *prometheus.CounterVec
 	modificationsCounter *prometheus.CounterVec
 )
 
 func init() {
+	buddyPrefix := pkg.GoogleConfig.BuddyLabelPrefix
+	if buddyPrefix == "" {
+		buddyPrefix = pkg.DefaultBuddyLabelPrefix
+	}
+	computeZonePrefix = buddyPrefix + "/%s"
+	labelPrefix = computeZonePrefix + "/%s"
+
 	additionsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "buddy",
 		Subsystem: "google_consumer",
@@ -323,16 +328,17 @@ func filterOwnRecordGroups(recordGroups []*RecordGroup, computeZones []string) [
 	}
 	ownRecordGroups := make([]*RecordGroup, 0, len(recordGroups))
 	for _, record := range recordGroups {
-		var found bool
+		skip := false
+	labelLoop:
 		for _, label := range record.Labels {
 			for computeZonesPrefix := range computeZonesPrefixes {
 				if strings.HasPrefix(label, computeZonesPrefix) {
-					found = true
-					continue
+					continue labelLoop
 				}
 			}
+			skip = true
 		}
-		if !found {
+		if len(record.Labels) == 0 || skip {
 			log.Debugf("[Cloud DNS] Skip not owned record %v", record)
 			continue
 		}

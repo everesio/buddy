@@ -4,6 +4,10 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
+const (
+	DefaultBuddyLabelPrefix = "buddy"
+)
+
 // GoogleConfig provides configuration of google producer and consumer
 var GoogleConfig struct {
 	Project           string
@@ -15,6 +19,7 @@ var GoogleConfig struct {
 	// additional zones not configured by ExternalIPDNSZone and InternalIPDNSZone
 	DNSZones         string
 	MultipleIPRecord bool
+	BuddyLabelPrefix string
 }
 
 func init() {
@@ -26,4 +31,5 @@ func init() {
 	kingpin.Flag("dns-ttl", "TTL in seconds for managed DNS resource records").Default("300").Int64Var(&GoogleConfig.DNSTTL)
 	kingpin.Flag("dns-zones", "Comma separated names of DNS managed zones").StringVar(&GoogleConfig.DNSZones)
 	kingpin.Flag("multiple-ip-record", "Allow multiple IP addresses in A record").Default("true").BoolVar(&GoogleConfig.MultipleIPRecord)
+	kingpin.Flag("buddy-label-prefix", "Prefix used in TXT records").Default(DefaultBuddyLabelPrefix).StringVar(&GoogleConfig.BuddyLabelPrefix)
 }
