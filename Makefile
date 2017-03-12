@@ -1,11 +1,14 @@
-.PHONY: clean check build.local build.linux build.osx
+.PHONY: clean check build.local build.linux build.osx build.docker build.push
 
 BINARY        ?= buddy
 VERSION       ?= $(shell git describe --tags --always --dirty)
+IMAGE         ?= everesio/$(BINARY)
+TAG           ?= $(VERSION)
 GITHEAD       = $(shell git rev-parse --short HEAD)
 GITURL        = $(shell git config --get remote.origin.url)
 GITSTATUS     = $(shell git status --porcelain || echo "no changes")
 SOURCES       = $(shell find . -name '*.go')
+DOCKERFILE    ?= Dockerfile
 GOPKGS        = $(shell go list ./... | grep -v /vendor/)
 BUILD_FLAGS   ?= -v
 LDFLAGS       ?= -X main.version=$(VERSION) -w -s
@@ -38,3 +41,8 @@ build/linux/$(BINARY): $(SOURCES)
 build/osx/$(BINARY): $(SOURCES)
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(BUILD_FLAGS) -o build/osx/$(BINARY) -ldflags "$(LDFLAGS)" .
 
+build.push: build.docker
+	docker push "$(IMAGE):$(TAG)"
+
+build.docker: build.linux
+	docker build --rm -t "$(IMAGE):$(TAG)" -f $(DOCKERFILE) .
