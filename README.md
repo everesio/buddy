@@ -1,7 +1,5 @@
 # Buddy 
 
-**WORK IN PROGRESS**
-
 Buddy synchronizes Google CloudDNS records with Google Compute Engine instances.
 
 Design and implementation are inspired by [Mate](https://github.com/zalando-incubator/mate).
