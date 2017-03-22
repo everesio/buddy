@@ -1,6 +1,7 @@
 package consumers
 
 import (
+	"github.com/everesio/buddy/pkg"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/api/dns/v1"
 	"testing"
@@ -9,6 +10,7 @@ import (
 type fakeDNSService struct {
 	projectDNSZones map[string]string
 	managedZoneRRS  map[string][]*dns.ResourceRecordSet
+	dnsZoneChanges  []*dnsZoneChange
 }
 
 func (s *fakeDNSService) getProjectDNSZones() (map[string]string, error) {
@@ -20,6 +22,7 @@ func (s *fakeDNSService) getResourceRecordSets(dnsZone string) ([]*dns.ResourceR
 }
 
 func (s *fakeDNSService) applyDNSZoneChange(dnsZoneChange *dnsZoneChange) error {
+	s.dnsZoneChanges = append(s.dnsZoneChanges, dnsZoneChange)
 	return nil
 }
 
@@ -463,4 +466,74 @@ func TestFilterOwnRecordGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemoveMultipleIPRecord(t *testing.T) {
+
+	a := assert.New(t)
+
+	fi := &fakeRecord{dnsName: "internal.example.com.", dnsZone: "internal-example-com", ttl: 400}
+	r1 := fi.recordGroup("instance-1", "10.132.0.1", "buddy/europe-west1-c/10.132.0.1")
+	r2 := fi.recordGroup("instance-2", "10.132.0.4", "")
+	r3 := fi.multiRecordGroup("instance-3", []string{"10.132.0.61", "10.132.0.62"}, []string{"buddy/europe-west1-c/10.132.0.61", "buddy/europe-west1-d/10.132.0.62"})
+	r4 := fi.recordGroup("instance-4", "10.132.0.7", "buddy2/europe-west1-c/10.132.0.7")
+
+	recordGroups := map[string]*RecordGroup{
+		r1.DNSName: r1,
+		r2.DNSName: r2,
+		r3.DNSName: r3,
+		r4.DNSName: r4,
+	}
+
+	result := removeMultipleIPRecord(recordGroups)
+
+	a.EqualValues(3, len(result))
+	a.EqualValues(result[r1.DNSName], r1)
+	a.EqualValues(result[r2.DNSName], r2)
+	a.EqualValues(result[r4.DNSName], r4)
+
+}
+
+func TestGetDNSZoneChanges(t *testing.T) {
+	a := assert.New(t)
+
+	fi := &fakeRecord{dnsName: "internal.example.com.", dnsZone: "internal-example-com", ttl: 300}
+	gc := &GoogleConsumer{
+		dnsZones: map[string]struct{}{
+			"internal-example-com": {},
+		},
+		multipleIPRecord: true,
+		dnsService: &fakeDNSService{
+			projectDNSZones: map[string]string{
+				"internal-example-com": "internal.example.org.",
+			},
+			managedZoneRRS: map[string][]*dns.ResourceRecordSet{
+				"internal-example-com": {
+					fi.aRecord("instance-1", "10.132.0.1"),
+					fi.txtRecord("instance-1", quote("buddy/europe-west1-c/10.132.0.1")...),
+					fi.aRecord("instance-2", "10.132.0.2"),
+					fi.txtRecord("instance-2", quote("buddy/europe-west1-c/10.132.0.2")...),
+					fi.aRecord("instance-3", "10.132.0.3"),
+					fi.aRecord("instance-4", "10.132.0.4"),
+					fi.txtRecord("instance-4", quote("buddy2/europe-west1-c/10.132.0.4")...),
+				},
+			},
+		},
+	}
+
+	endpoints := make([]*pkg.Endpoint, 0, 0)
+	changes, err := gc.getDNSZoneChanges([]string{"europe-west1-c"}, endpoints)
+	a.NoError(err)
+	a.EqualValues(2, len(changes))
+	a.EqualValues("internal-example-com", changes[0].dnsZone)
+	a.EqualValues(2, len(changes[0].change.Deletions))
+	a.EqualValues("internal-example-com", changes[1].dnsZone)
+	a.EqualValues(2, len(changes[1].change.Deletions))
+
+	ips := map[string]bool{
+		changes[0].change.Deletions[0].Rrdatas[0]: true,
+		changes[1].change.Deletions[0].Rrdatas[0]: true,
+	}
+	a.True(ips["10.132.0.1"])
+	a.True(ips["10.132.0.2"])
 }
